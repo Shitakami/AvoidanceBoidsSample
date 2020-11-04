@@ -1,0 +1,5 @@
+Base path: 'C:/Program Files/UnityVersions/2019.4.1f1/Editor/Data', plugins path 'C:/Program Files/UnityVersions/2019.4.1f1/Editor/Data/PlaybackEngines'
+Cmd: initializeCompiler
+Cmd: compileComputeKernel
+  error: 2 plat 4 at VectorGridCalculator.compute(50): if statement conditional expressions must evaluate to a scalar
+  api=4 insize=1614 outsize=0 ok=0

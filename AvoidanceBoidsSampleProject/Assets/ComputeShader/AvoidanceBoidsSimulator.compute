@@ -1,0 +1,259 @@
+﻿#pragma kernel UpdateVectorField
+#pragma kernel InitializeVectorField
+#pragma kernel UpdateBoids
+
+#include "Assets/cgincFiles/rotation.cginc"
+
+#define COUNT 3
+
+////////// ベクトル場用変数 ///////////////////////////////////////////
+
+struct VectorFieldSquare {
+    float3 position;
+    float3 direction;
+};
+
+
+RWStructuredBuffer<VectorFieldSquare> _VectorFieldBuffer;
+StructuredBuffer<float3> _PositionBuffer;
+StructuredBuffer<float3> _NormalBuffer;
+
+float _SquareScale;
+int _VectorFieldLength;
+
+float3 _MinField;
+float3 _MaxField;
+
+float3 _ModelPosition[COUNT];
+float3 _ModelEulerAngle[COUNT];
+float3 _ModelScale[COUNT];
+
+int _VertexCountsThresholds[COUNT];
+
+/////////////////////////////////////////////////////////////////////
+
+//////////////////// Boidsアルゴリズム用変数 //////////////////////////
+struct BoidsData {
+    float3 position;
+    float3 velocity;
+};
+
+RWStructuredBuffer<BoidsData> _BoidsData;
+
+// Boidsパラメータ
+float _CohesionForce;
+float _SeparationForce;
+float _AlignmentForce;
+
+float _CohesionDistance;
+float _SeparationDistance;
+float _AlignmentDistance;
+
+float _CohesionAngle;
+float _SeparationAngle;
+float _AlignmentAngle;
+
+float _BoundaryForce;
+float _BoundaryRange;
+float3 _BoundaryCenter;
+
+float _AvoidForce;
+
+float _MaxVelocity;
+float _MinVelocity;
+
+int _InstanceCount;
+
+float _MaxForce;
+
+float _DeltaTime;
+float _Epsilon;
+
+/////////////////////////////////////////////////////////////////////
+
+// 速度と座標から角度を求める
+float CalcAngle(float3 velocity, float3 posX, float3 posY) {
+
+    float3 vec = posY - posX;
+
+    return acos(dot(normalize(velocity), normalize(vec)));
+
+}
+
+// 距離の2乗を求める
+float CalcSqrDistance(float3 posX, float3 posY) {
+
+    float3 vec = posY - posX;
+
+    return dot(vec, vec);
+
+}
+
+// ベクトルの大きさを制限する
+float3 limit(float3 vec, float max)
+{
+	float length = sqrt(dot(vec, vec)); // 大きさ
+	return (length > max && length > 0) ? vec.xyz * (max / length) : vec.xyz;
+}
+
+[numthreads(8, 1, 1)]
+void UpdateVectorField(uint id : SV_DISPATCHTHREADID) {
+
+    int transformIndex = 0;
+
+    for(int i = 0; (int)id < _VertexCountsThresholds[i]; ++i)
+        transformIndex = i;
+
+    float3 pos = _PositionBuffer[id];
+    float3 normal = _NormalBuffer[id];
+    float4x4 rotMat = EulerAnglesToMatrix(_ModelEulerAngle[transformIndex]);    // 回転行列を求める
+
+    pos = mul(rotMat, pos);
+
+    pos.x *= _ModelScale[transformIndex].x;
+    pos.y *= _ModelScale[transformIndex].y;
+    pos.z *= _ModelScale[transformIndex].z;
+
+    pos += _ModelPosition[transformIndex];
+
+    // 範囲外は計算しない
+    if(pos.x < _MinField.x || _MaxField.x <= pos.x ||
+       pos.y < _MinField.y || _MaxField.y <= pos.y ||
+       pos.z < _MinField.z || _MaxField.z <= pos.z)
+        return;
+
+    // 頂点座標がどのマス目にいるか計算してindexを取得
+    int3 index = (pos - _MinField) / _SquareScale;
+
+    normal = mul(rotMat, normal);
+
+    _VectorFieldBuffer[(index.x * _VectorFieldLength * _VectorFieldLength +
+                        index.y * _VectorFieldLength +
+                        index.z)].direction += normal;
+
+    // ベクトルの要素の符号を取得
+    int xd = normal.x / abs(normal.x + _Epsilon);
+    int yd = normal.y / abs(normal.y + _Epsilon);
+    int zd = normal.z / abs(normal.z + _Epsilon);
+
+    if(0 <= index.x + xd && index.x + xd < _VectorFieldLength)
+        _VectorFieldBuffer[(index.x + xd) * _VectorFieldLength * _VectorFieldLength +
+                           index.y * _VectorFieldLength +
+                           index.z].direction += normal * abs(normal.x);
+    
+    if(0 <= index.y + yd && index.y + yd < _VectorFieldLength)
+        _VectorFieldBuffer[index.x * _VectorFieldLength * _VectorFieldLength +
+                           (index.y + yd) * _VectorFieldLength +
+                           index.z].direction += normal * abs(normal.y);
+    
+    if(0 <= index.z + zd && index.z + zd < _VectorFieldLength)
+        _VectorFieldBuffer[index.x * _VectorFieldLength * _VectorFieldLength +
+                           index.y * _VectorFieldLength +
+                           index.z + zd].direction += normal * abs(normal.z);
+
+}
+
+
+[numthreads(8, 1, 1)]
+void InitializeVectorField(uint id : SV_DISPATCHTHREADID) {
+
+    _VectorFieldBuffer[id].direction = float3(0, 0, 0);
+
+}
+
+[numthreads(256, 1, 1)]
+void UpdateBoids(uint id : SV_DISPATCHTHREADID) {
+
+        float3 posX = _BoidsData[id.x].position;
+    float3 velX = _BoidsData[id.x].velocity;
+
+    float3 cohesionPositionSum = float3(0, 0, 0);
+    float3 separationPositionSum = float3(0, 0, 0);
+    float3 alignmentVelocitySum = float3(0, 0, 0);
+
+    int cohesionCount = 0;
+    int alignmentCount = 0;
+
+    for(uint i = 0; i < (uint)_InstanceCount; ++i) {
+
+        // 自身の計算は行わない
+        if(i == id.x)
+            continue;
+
+        float3 posY = _BoidsData[i].position;
+        float3 velY = _BoidsData[i].velocity;
+
+        float sqrDistance = CalcSqrDistance(posX, posY);
+        float angle = CalcAngle(velX, posX, posY);
+
+        // 結合
+        if(sqrDistance < _CohesionDistance && angle < _CohesionAngle) {
+            cohesionPositionSum += posY;
+            cohesionCount++;
+        }
+
+        // 分離
+        if(sqrDistance < _SeparationDistance && angle < _SeparationAngle) {
+            separationPositionSum += normalize(posX - posY) / sqrt(sqrDistance);        
+        }
+
+        // 整列
+        if(sqrDistance < _AlignmentDistance && angle < _AlignmentAngle) {
+            alignmentVelocitySum += velY;
+            alignmentCount++;
+        }
+
+    }
+
+    float3 cohesion = float3(0, 0, 0);
+    float3 separation = separationPositionSum;
+    float3 alignment = float3(0, 0, 0);
+    float3 boundary = float3(0, 0, 0);
+    float3 avoid = float3(0, 0, 0);
+
+    if(cohesionCount != 0)
+        cohesion = (cohesionPositionSum / (float)cohesionCount - posX) * _CohesionForce;
+    
+    if(alignmentCount != 0) 
+        alignment = (alignmentVelocitySum / (float)alignmentCount - velX) * _AlignmentForce;
+    
+    separation *= _SeparationForce;
+
+    // 範囲外から出た個体は範囲内に戻る力を加える
+    
+    float sqrDistFromCenter = dot(_BoundaryCenter - posX, _BoundaryCenter - posX);
+    if(sqrDistFromCenter > _BoundaryRange)
+        boundary = -_BoundaryForce * posX * (sqrDistFromCenter - _BoundaryRange) / sqrDistFromCenter;
+
+    // ベクトル場内にいる際は、ベクトルの値を取得してその方向に逃げるようにする
+    if(_MinField.x <= posX.x && posX.x < _MaxField.x &&
+       _MinField.y <= posX.y && posX.y < _MaxField.y &&
+       _MinField.z <= posX.z && posX.z < _MaxField.z) {
+        int3 index = (posX - _MinField) / _SquareScale;
+        avoid = _VectorFieldBuffer[(index.x * _VectorFieldLength * _VectorFieldLength +
+                        index.y * _VectorFieldLength +
+                        index.z)].direction * _AvoidForce;
+       }
+
+    // 結合、分離、整列の力を制限
+    cohesion = limit(cohesion, _MaxForce);
+    separation = limit(separation, _MaxForce);
+    alignment = limit(alignment, _MaxForce);
+
+    velX += (cohesion + separation + alignment + boundary + avoid) * _DeltaTime;
+
+    float velXScale = length(velX);
+
+    // 速度を制限
+    if(velXScale < _MinVelocity) {
+        velX = _MinVelocity * normalize(velX);
+    }
+    else if (velXScale > _MaxVelocity) {
+        velX = _MaxVelocity * normalize(velX);
+    }
+
+    _BoidsData[id.x].velocity = velX;
+    _BoidsData[id.x].position += velX;
+
+
+}

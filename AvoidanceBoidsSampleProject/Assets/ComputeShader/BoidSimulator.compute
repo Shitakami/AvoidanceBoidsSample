@@ -1,0 +1,144 @@
+﻿#pragma kernel BoidsCalculation
+
+struct BoidsData {
+    float3 position;
+    float3 velocity;
+};
+
+RWStructuredBuffer<BoidsData> boidsData;
+
+// Boidsパラメータ
+float cohesionForce;
+float separationForce;
+float alignmentForce;
+
+float cohesionDistance;
+float separationDistance;
+float alignmentDistance;
+
+float cohesionAngle;
+float separationAngle;
+float alignmentAngle;
+
+float boundaryForce;
+float boundaryRange;
+
+float maxVelocity;
+float minVelocity;
+
+int instanceCount;
+
+float maxForce;
+
+float deltaTime;
+
+// 速度と座標から角度を求める
+float CalcAngle(float3 velocity, float3 posX, float3 posY) {
+
+    float3 vec = posY - posX;
+
+    return acos(dot(normalize(velocity), normalize(vec)));
+
+}
+
+// 距離の2乗を求める
+float CalcSqrDistance(float3 posX, float3 posY) {
+
+    float3 vec = posY - posX;
+
+    return dot(vec, vec);
+
+}
+
+// ベクトルの大きさを制限する
+float3 limit(float3 vec, float max)
+{
+	float length = sqrt(dot(vec, vec)); // 大きさ
+	return (length > max && length > 0) ? vec.xyz * (max / length) : vec.xyz;
+}
+
+
+
+[numthreads(256, 1, 1)]
+void BoidsCalculation(uint id : SV_DISPATCHTHREADID) {
+
+    float3 posX = boidsData[id.x].position;
+    float3 velX = boidsData[id.x].velocity;
+
+    float3 cohesionPositionSum = float3(0, 0, 0);
+    float3 separationPositionSum = float3(0, 0, 0);
+    float3 alignmentVelocitySum = float3(0, 0, 0);
+
+    int cohesionCount = 0;
+    int alignmentCount = 0;
+
+    for(uint i = 0; i < instanceCount; ++i) {
+
+        // 自身の計算は行わない
+        if(i == id.x)
+            continue;
+
+        float3 posY = boidsData[i].position;
+        float3 velY = boidsData[i].velocity;
+
+        float sqrDistance = CalcSqrDistance(posX, posY);
+        float angle = CalcAngle(velX, posX, posY);
+
+        // 結合
+        if(sqrDistance < cohesionDistance && angle < cohesionAngle) {
+            cohesionPositionSum += posY;
+            cohesionCount++;
+        }
+
+        // 分離
+        if(sqrDistance < separationDistance && angle < separationAngle) {
+            separationPositionSum += normalize(posX - posY) / sqrt(sqrDistance);        
+        }
+
+        // 整列
+        if(sqrDistance < alignmentDistance && angle < alignmentAngle) {
+            alignmentVelocitySum += velY;
+            alignmentCount++;
+        }
+
+    }
+
+    float3 cohesion = float3(0, 0, 0);
+    float3 separation = separationPositionSum;
+    float3 alignment = float3(0, 0, 0);
+    float3 boundary = float3(0, 0, 0);
+
+    if(cohesionCount != 0)
+        cohesion = (cohesionPositionSum / (float)cohesionCount - posX) * cohesionForce;
+    
+    if(alignmentCount != 0) 
+        alignment = (alignmentVelocitySum / (float)alignmentCount - velX) * alignmentForce;
+    
+    separation *= separationForce;
+
+    // 範囲外から出た個体は範囲内に戻る力を加える
+    float sqrDistFromCenter = dot(posX, posX);
+    if(sqrDistFromCenter > boundaryRange)
+        boundary = -boundaryForce * posX * (sqrDistFromCenter - boundaryRange) / sqrDistFromCenter;
+
+    // 結合、分離、整列の力を制限
+    cohesion = limit(cohesion, maxForce);
+    separation = limit(separation, maxForce);
+    alignment = limit(alignment, maxForce);
+
+    velX += (cohesion + separation + alignment + boundary) * deltaTime;
+
+    float velXScale = length(velX);
+
+    // 速度を制限
+    if(velXScale < minVelocity) {
+        velX = minVelocity * normalize(velX);
+    }
+    else if (velXScale > maxVelocity) {
+        velX = maxVelocity * normalize(velX);
+    }
+
+    boidsData[id.x].velocity = velX;
+    boidsData[id.x].position += velX;
+
+}

@@ -1,0 +1,61 @@
+﻿#pragma kernel CalcVectorGrid
+#pragma kernel InitializeGrid
+
+#include "Assets/cgincFiles/rotation.cginc"
+
+struct BoxData {
+    float3 position;
+    float3 direction;
+};
+
+RWStructuredBuffer<BoxData> boxData;
+StructuredBuffer<float3> normals;
+StructuredBuffer<float3> positions;
+
+float3 minField;
+float3 maxField;
+
+float boxScale;
+int boxLength;
+
+float4 modelRotation;
+float3 modelPosition;
+float3 modelLocalScale;
+float3 modelEulerAngle;
+
+[numthreads(8,1,1)]
+void CalcVectorGrid (uint id : SV_DispatchThreadID)
+{
+
+    float3 pos = positions[id];
+    float3 normal = normals[id];
+    float4x4 rotMat = EulerAnglesToMatrix(modelEulerAngle); // 回転行列を求める
+
+    pos = mul(rotMat, pos);
+   
+    pos.x *= modelLocalScale.x;
+    pos.y *= modelLocalScale.y;
+    pos.z *= modelLocalScale.z;
+
+    pos += modelPosition;
+
+    // 範囲外は計算しない
+    if(pos.x < minField.x || maxField.x <= pos.x ||
+       pos.y < minField.y || maxField.y <= pos.y ||
+       pos.z < minField.z || maxField.z <= pos.z)
+        return;
+
+    int3 index = (pos - minField) / boxScale;
+
+    normal = mul(rotMat, normal);
+
+    boxData[(index.x * boxLength * boxLength + index.y * boxLength + index.z)].direction += normal;
+
+}
+
+[numthreads(8, 1, 1)]
+void InitializeGrid(uint id : SV_DISPATCHTHREADID) {
+
+    boxData[id].direction = float3(0, 0, 0);
+
+}
