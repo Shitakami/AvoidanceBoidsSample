@@ -32,25 +32,5 @@ float4x4 EulerAnglesToMatrix(float3 angles) {
     );
 }
 
-float4x4 quaternionToMat(float4 q){
-    float4x4 m;
-    m._11 = 1.0f - 2.0f * q.y * q.y - 2.0f * q.z * q.z;
-    m._12 = 2.0f * q.x * q.y + 2.0f * q.w * q.z;
-    m._13 = 2.0f * q.x * q.z - 2.0f * q.w * q.y;
-    m._14 = 0;
-
-    m._21 = 2.0f * q.x * q.y - 2.0f * q.w * q.z;
-    m._22 = 1.0f - 2.0f * q.x * q.x - 2.0f * q.z * q.z;
-    m._23 = 2.0f * q.y * q.z + 2.0f * q.w * q.x;
-    m._24 = 0;
-
-    m._31 = 2.0f * q.x * q.z + 2.0f * q.w * q.y;
-    m._32 = 2.0f * q.y * q.z - 2.0f * q.w * q.x;
-    m._33 = 1.0f - 2.0f * q.x * q.x - 2.0f * q.y * q.y;
-    m._34 = 0;
-
-    m._41_42_43_44 = float4(0,0,0,1);
-    return m;
-}
 
 #endif
