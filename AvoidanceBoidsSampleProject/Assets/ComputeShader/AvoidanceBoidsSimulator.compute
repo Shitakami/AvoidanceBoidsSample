@@ -223,7 +223,7 @@ void UpdateBoids(uint id : SV_DISPATCHTHREADID) {
     
     float sqrDistFromCenter = dot(_BoundaryCenter - posX, _BoundaryCenter - posX);
     if(sqrDistFromCenter > _BoundaryRange)
-        boundary = -_BoundaryForce * posX * (sqrDistFromCenter - _BoundaryRange) / sqrDistFromCenter;
+        boundary = -_BoundaryForce * (posX - _BoundaryCenter) * (sqrDistFromCenter - _BoundaryRange) / sqrDistFromCenter;
 
     // ベクトル場内にいる際は、ベクトルの値を取得してその方向に逃げるようにする
     if(_MinField.x <= posX.x && posX.x < _MaxField.x &&

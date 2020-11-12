@@ -182,6 +182,7 @@ public class AvoidanceBoids : MonoBehaviour
         uint x, y, z;
 
         // すべてのSkinnedMeshRendererの頂点数を求める
+        // また頂点数の累積和を求めてComputeShaderの計算で使用する
         int vertexCount = 0;
         for(int i = 0; i < m_skinnedMeshRenderer.Length; ++i) {
             vertexCount += m_skinnedMeshRenderer[i].sharedMesh.vertexCount;

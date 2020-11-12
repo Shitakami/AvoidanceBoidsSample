@@ -23,6 +23,8 @@ float3 modelPosition;
 float3 modelLocalScale;
 float3 modelEulerAngle;
 
+float _Epsilon = 1.401298E-45;  
+
 [numthreads(8,1,1)]
 void CalcVectorGrid (uint id : SV_DispatchThreadID)
 {
@@ -50,6 +52,28 @@ void CalcVectorGrid (uint id : SV_DispatchThreadID)
     normal = mul(rotMat, normal);
 
     boxData[(index.x * boxLength * boxLength + index.y * boxLength + index.z)].direction += normal;
+
+    
+    // ベクトルの要素の符号を取得
+    int xd = normal.x / abs(normal.x + _Epsilon);
+    int yd = normal.y / abs(normal.y + _Epsilon);
+    int zd = normal.z / abs(normal.z + _Epsilon);
+
+    if(0 <= index.x + xd && index.x + xd < boxLength)
+        boxData[(index.x + xd) * boxLength * boxLength +
+                           index.y * boxLength +
+                           index.z].direction += normal * abs(normal.x);
+    
+    if(0 <= index.y + yd && index.y + yd < boxLength)
+        boxData[index.x * boxLength * boxLength +
+                           (index.y + yd) * boxLength +
+                           index.z].direction += normal * abs(normal.y);
+    
+    if(0 <= index.z + zd && index.z + zd < boxLength)
+        boxData[index.x * boxLength * boxLength +
+                           index.y * boxLength +
+                           index.z + zd].direction += normal * abs(normal.z);
+
 
 }
 
